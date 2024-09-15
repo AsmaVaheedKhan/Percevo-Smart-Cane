@@ -1,0 +1,82 @@
+import os
+import cv2
+from picamera2 import Picamera2
+from gtts import gTTS
+from gpiozero import DistanceSensor
+from time import sleep
+
+def CountFreq(detected_objects):
+    freq = {}
+    for item in detected_objects:
+        freq[item] = detected_objects.count(item)
+    #   print(freq)
+    a = str(freq)
+    if cv2.waitKey(1) & 0xFF == ord('r'):
+        print(a)
+        speak(a)
+   
+
+def speak(*objects):
+    object_list = ", ".join(objects)
+    text = f"The objects in your frame are {object_list}"
+    tts = gTTS(text=text, lang='en')
+    tts.save("audio.mp3")
+    os.system("mpg321 audio.mp3")
+
+# Initialize the Picamera2 object
+picam2 = Picamera2()
+picam2.preview_configuration.main.size = (640, 480)  # Set preview size
+picam2.preview_configuration.main.format = "RGB888"  # Set preview format
+picam2.start()
+
+# This is to pull the information about what each object is called
+classNames = []
+classFile = "/home/percevo/Desktop/Object_Detection_Files/coco.names"
+with open(classFile, "rt") as f:
+    classNames = f.read().rstrip("\n").split("\n")
+
+# This is to pull the information about what each object should look like
+configPath = "/home/percevo/Desktop/Object_Detection_Files/ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt"
+weightsPath = "/home/percevo/Desktop/Object_Detection_Files/frozen_inference_graph.pb"
+
+# This is some set up values to get good results
+net = cv2.dnn_DetectionModel(weightsPath, configPath)
+net.setInputSize(320, 320)
+net.setInputScale(1.0 / 127.5)
+net.setInputMean((127.5, 127.5, 127.5))
+net.setInputSwapRB(True)
+
+# Initialize detected_objects outside the loop
+detected_objects = []
+
+# Below is the never-ending loop that determines what will happen when an object is identified.
+while True:
+    # Capture frame from Picamera2
+    img = picam2.capture_array()
+   
+    # Perform object detection
+    classIds, confs, bbox = net.detect(img, confThreshold=0.45, nmsThreshold=0.2)
+
+    # Draw bounding boxes and labels on the frame
+    if len(classIds) > 0:
+        detected_objects = []  # Clear detected_objects list for each frame
+        for classId, confidence, box in zip(classIds.flatten(), confs.flatten(), bbox):
+            className = classNames[classId - 1]
+            # print(f"Object Detected: {className}")  # Print the detected object
+            detected_objects.append(className)
+            cv2.rectangle(img, box, color=(0, 255, 0), thickness=2)
+            cv2.putText(img, f"{className}: {confidence:.2f}", (box[0], box[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Display the processed frame with bounding boxes and labels
+    CountFreq(detected_objects)
+    cv2.imshow("Object Detection", img)
+   
+    # Check for 'q' key press to exit the loop
+    if cv2.waitKey(1) == ord('q'):
+        break
+
+# Clean up resources
+picam2.stop()
+cv2.destroyAllWindows()
+
